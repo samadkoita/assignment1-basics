@@ -594,11 +594,8 @@ def run_train_bpe(
     corpus = all_bytes.decode("utf-8")
     def init_vocab():
         vocab = {i: s.encode("utf-8") for i, s in enumerate(special_tokens)}
-
         nxt = len(vocab)
-        vocab.update({
-            nxt + b: bytes([b]) for b in range(256)
-        })
+        vocab.update({nxt + b: bytes([b]) for b in range(256)})
         inv_vocab = {b: nxt + b for b in range(256)}
         return vocab, inv_vocab
     vocab, inv_vocab = init_vocab()
@@ -607,7 +604,6 @@ def run_train_bpe(
     def build_pretokens(all_bytes, corpus, inv_vocab):
         pretokens = defaultdict(int)
         PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-
         complied_regex = re.compile(PAT)
         special_tokens_re = "|".join(re.escape(s) for s in special_tokens)
         for corp in re.split(special_tokens_re, corpus):
@@ -623,8 +619,6 @@ def run_train_bpe(
             for i in range(len(pretoken) - 1):
                 pairs[pretoken[i], pretoken[i+1]] += cnt
         return pairs
-
-
 
     def update_pretokens():
         delete_keys = []
@@ -660,7 +654,6 @@ def run_train_bpe(
         pretokens.update(to_add)
         token_list = new_token_list
 
-
     merges = []
     # tqdm progress bar for merge loop
     pbar = tqdm(total=vocab_size - len(vocab), desc="BPE merges")
@@ -678,9 +671,13 @@ def run_train_bpe(
 
 
 if __name__ == "__main__":
+    import time
+    st = time.time()
     run_train_bpe(
-        input_path="./data/TinyStoriesV2-GPT4-valid.txt",
-        # input_path="./tests/fixtures/corpus.en",
-        vocab_size=500,
+        # input_path="./data/TinyStoriesV2-GPT4-train.txt",
+        input_path="./tests/fixtures/corpus.en",
+        vocab_size=5000,
         special_tokens=["<|endoftext|>"]
     )
+    end = time.time()
+    print(end - st)
