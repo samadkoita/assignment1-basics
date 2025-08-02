@@ -1,16 +1,17 @@
 from __future__ import annotations
-
+import time
 import os
 from typing import IO, Any, BinaryIO
 from collections.abc import Iterable
-from collections import defaultdict
+
 from jaxtyping import Float, Int
-import regex as re
+
 import numpy.typing as npt
 import torch
 from torch import Tensor
-from tqdm import tqdm
 
+
+from cs336_basics.tokenization import train_bpe, Tokenizer
 
 
 def run_linear(
@@ -560,8 +561,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
-
+    return Tokenizer(vocab, merges, special_tokens)
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -590,94 +590,36 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    all_bytes = open(input_path, 'rb').read()
-    corpus = all_bytes.decode("utf-8")
-    def init_vocab():
-        vocab = {i: s.encode("utf-8") for i, s in enumerate(special_tokens)}
-        nxt = len(vocab)
-        vocab.update({nxt + b: bytes([b]) for b in range(256)})
-        inv_vocab = {b: nxt + b for b in range(256)}
-        return vocab, inv_vocab
-    vocab, inv_vocab = init_vocab()
+    return train_bpe(input_path, vocab_size, special_tokens)
 
-
-    def build_pretokens(all_bytes, corpus, inv_vocab):
-        pretokens = defaultdict(int)
-        PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-        complied_regex = re.compile(PAT)
-        special_tokens_re = "|".join(re.escape(s) for s in special_tokens)
-        for corp in re.split(special_tokens_re, corpus):
-            for pretoken in re.finditer(complied_regex, corp):
-                pretokens[tuple(inv_vocab[d] for d in corp[pretoken.start():pretoken.end()].encode("utf-8"))] += 1
-        return pretokens
-
-    pretokens = build_pretokens(all_bytes, corpus, inv_vocab)
-
-    def build_pairs():
-        pairs = defaultdict(int)
-        for pretoken, cnt in pretokens.items():
-            for i in range(len(pretoken) - 1):
-                pairs[pretoken[i], pretoken[i+1]] += cnt
-        return pairs
-
-    def update_pretokens():
-        delete_keys = []
-        to_add = {}
-        for pretoken, cnt in pretokens.items():
-            if max_key[0] not in pretoken or max_key[1] not in pretoken:
-                continue
-            t = 0
-            token_list = pretoken
-            new_token_list = []
-            while t < len(token_list):
-                if t + 1 < len(token_list) and (token_list[t], token_list[t+1]) == max_key:
-                    new_token_list.append(new_token_idx)
-                    t += 1
-                else:
-                    new_token_list.append(token_list[t])
-                t += 1
-
-            if len(token_list) == len(new_token_list):
-                continue
-
-            for i in range(len(new_token_list)-1):
-                pairs[(new_token_list[i], new_token_list[i+1])] += cnt
-            for i in range(len(token_list) - 1):
-                pairs[(token_list[i], token_list[i+1])] -= cnt
-                if not pairs[(token_list[i], token_list[i+1])]:
-                    del pairs[(token_list[i], token_list[i+1])]
-            delete_keys.append(pretoken)
-            to_add[tuple(new_token_list)] = cnt
-
-        for d in delete_keys:
-            pretokens.pop(d)
-        pretokens.update(to_add)
-        token_list = new_token_list
-
-    merges = []
-    # tqdm progress bar for merge loop
-    pbar = tqdm(total=vocab_size - len(vocab), desc="BPE merges")
-    pairs = build_pairs()
-    while len(vocab) < vocab_size:
-        max_key = max(pairs.keys(), key=lambda x: (pairs[x], vocab[x[0]], vocab[x[1]]))
-        new_token = vocab[max_key[0]] + vocab[max_key[1]]
-        merges.append((vocab[max_key[0]], vocab[max_key[1]]))
-        new_token_idx = len(vocab)
-        vocab[new_token_idx] = new_token
-        update_pretokens()
-        pbar.update(1)
-    pbar.close()
-    return vocab, merges
-
+config = {
+    "owt": {
+        "input_path": "./data/owt_train.txt",
+        "vocab_size": 32000,
+        "special_tokens": ["<|endoftext|>"]
+    },
+    "TinyStories": {
+        "input_path": "./data/TinyStoriesV2-GPT4-train.txt",
+        "vocab_size": 10000,
+        "special_tokens": ["<|endoftext|>"]
+    }
+}
 
 if __name__ == "__main__":
-    import time
     st = time.time()
-    run_train_bpe(
-        # input_path="./data/TinyStoriesV2-GPT4-train.txt",
-        input_path="./tests/fixtures/corpus.en",
-        vocab_size=5000,
+    key = "owt"
+    data_path, vocab_size = config[key]["input_path"], config[key]["vocab_size"]
+    special_tokens = config[key]["special_tokens"]
+    vocab, merges = run_train_bpe(
+        input_path=data_path,
+        # input_path="./tests/fixtures/corpus.en",
+        vocab_size=vocab_size,
         special_tokens=["<|endoftext|>"]
     )
+    with open("./data/vocab_owt2t", "wb") as f:
+        import pickle
+        pickle.dump(vocab, f)
+    with open("./data/merges_owt2", "wb") as f: 
+        pickle.dump(merges, f)
     end = time.time()
     print(end - st)

@@ -21,6 +21,7 @@ def test_train_bpe_speed():
         special_tokens=["<|endoftext|>"],
     )
     end_time = time.time()
+    print(end_time - start_time)
     assert end_time - start_time < 1.5
 
 
@@ -59,7 +60,7 @@ def test_train_bpe():
     # Rather than checking that the vocabs exactly match (since they could
     # have been constructed differently, we'll make sure that the vocab keys and values match)
     assert set(vocab.keys()) == set(reference_vocab.keys())
-    assert set(vocab.values()) == set(reference_vocab.values())
+    assert set(vocab.values()) == set(reference_vocab.values()), (set(vocab.values()) - set(reference_vocab.values()), set(reference_vocab.values()) - set(vocab.values()))
 
 
 def test_train_bpe_special_tokens(snapshot):
@@ -86,3 +87,8 @@ def test_train_bpe_special_tokens(snapshot):
             "merges": merges,
         },
     )
+
+if __name__ == '__main__':
+    test_train_bpe_speed()
+    #test_train_bpe()
+    test_train_bpe_special_tokens()
