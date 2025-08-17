@@ -2,25 +2,41 @@ import os
 import time
 from tqdm import tqdm
 from collections import defaultdict
-from jaxtyping import Float, Int
+# from jaxtyping import Float, Int
 import regex as re
 import pickle
+from typing import Generator
 
 mini_chunk_size = 8192
 pool_size = 32
 
-def _build_pretokens(corpus, special_tokens):
-    # print(corpus[:500] + corpus[-500:], end="\n"+"="*80+"\n")
-    pretokens = defaultdict(int)
+def _yield_pretokens(corpus, special_tokens, include_special_tokens: bool = False) -> Generator[tuple[re.Match, str], None, None]:
+    
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
     complied_regex = re.compile(PAT)
-    special_tokens_re = "|".join(re.escape(s) for s in special_tokens)
-    num_special_tokens = len(special_tokens)
-    for corp in re.split(special_tokens_re, corpus):
-        for pretoken in re.finditer(complied_regex, corp):
-            pretokens[tuple(d+num_special_tokens for d in corp[pretoken.start():pretoken.end()].encode("utf-8"))] += 1
-    return pretokens
+    special_tokens_re = "|".join(re.escape(s) for s in sorted(special_tokens, key=len, reverse=True))
+    combined_pattern = f"({special_tokens_re})" if special_tokens_re else None
+    if combined_pattern:
+        iterate_over = re.split(combined_pattern, corpus)
+    else:
+        iterate_over = [corpus]
+    for part in iterate_over:
+        if not part:  # Skip empty strings
+            continue
+        if include_special_tokens and part in special_tokens:
+            # This is a special token, yield it as-is
+            yield None, part
+        else:
+            for pretoken in re.finditer(complied_regex, part):
+                yield pretoken, part[pretoken.start():pretoken.end()]
 
+def _build_pretokens(corpus, special_tokens) -> dict[tuple[bytes]]:
+    # print(corpus[:500] + corpus[-500:], end="\n"+"="*80+"\n")
+    pretokens = defaultdict(int)
+    num_special_tokens = len(special_tokens)
+    for _, txt in _yield_pretokens(corpus, special_tokens):
+        pretokens[tuple(d+num_special_tokens for d in txt.encode("utf-8"))] += 1
+    return pretokens
 
 def init_vocab(special_tokens):
     vocab = {i: s.encode("utf-8") for i, s in enumerate(special_tokens)}
@@ -81,8 +97,8 @@ def build_pretokens_chunked(input_path, special_tokens):
     return pretokens_final
 
 def build_pretokens(input_path, special_tokens):
-    all_bytes = open(input_path, 'r').read()
-    return _build_pretokens(all_bytes, special_tokens)
+    corpus = open(input_path, 'r').read()
+    return _build_pretokens(corpus, special_tokens)
 
 
 def train_bpe(input_path: str, vocab_size: int, special_tokens: list[str] | None = None) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
@@ -154,12 +170,40 @@ class Tokenizer:
         self.vocab = vocab
         self.merges = merges
         self.special_tokens = special_tokens or []
+        self.inv_vocab: dict[bytes, int] = {v: i for i, v in self.vocab.items()}
+        self.inv_merge: dict[tuple[int, int], int] = {(self.inv_vocab[v[0]], self.inv_vocab[v[1]]): self.inv_vocab[v[0] + v[1]] for i, v in enumerate(self.merges)}
 
     def encode(self, text: str) -> list[int]:
-        text_bytes = text.encode("utf-8")
+        ans = []
+        for pretoken, txt in _yield_pretokens(text, self.special_tokens, include_special_tokens=True):
+            if txt in self.special_tokens:
+                ans.append(self.inv_vocab[txt.encode("utf-8")])
+                continue
+            txt = txt.encode("utf-8", errors="ignore")
+            tokens = [self.inv_vocab[bytes([t])] for t in  txt]
+            while True:
+                final = []
+                min_v = len(self.vocab) + 1
+                for i in range(len(tokens) - 1):
+                    if (curr_v:= self.inv_merge.get((tokens[i], tokens[i+1]), len(self.vocab) + 2)) < min_v:
+                        min_v = curr_v
+                if min_v == len(self.vocab) + 1:
+                    break
+                i = 0
+                while i < len(tokens):
+                    if i+1 < len(tokens) and (curr_v:= self.inv_merge.get((tokens[i], tokens[i+1]), len(self.vocab) + 2)) == min_v:
+                        final.append(min_v)
+                        i += 2
+                    else:
+                        final.append(tokens[i])
+                        i += 1
+                tokens = final
+            ans.extend(tokens)
+        return ans
 
-        pass
-
+    def decode(self, tokens: list[int]) -> str:
+        ans = [self.vocab[t] for t in tokens]
+        return b"".join(ans).decode("utf-8", errors="replace")
 
     @classmethod
     def from_files(cls, vocab_path: str, merges_path: str, special_tokens: list[str] | None = None) -> "Tokenizer":
@@ -172,5 +216,7 @@ if __name__ == "__main__":
     merges_path = "data/merges_TinyStories_final"
     special_tokens = ["<|endoftext|>"]
     tokenizer = Tokenizer.from_files(vocab_path, merges_path, special_tokens)
+    ret = tokenizer.encode(" the")
+    print(ret)
     assert len(tokenizer.vocab) == 10000
 
