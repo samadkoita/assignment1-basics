@@ -2,6 +2,7 @@ import os
 import time
 from tqdm import tqdm
 from collections import defaultdict
+from typing import Iterable, Iterator
 # from jaxtyping import Float, Int
 import regex as re
 import pickle
@@ -204,6 +205,34 @@ class Tokenizer:
     def decode(self, tokens: list[int]) -> str:
         ans = [self.vocab[t] for t in tokens]
         return b"".join(ans).decode("utf-8", errors="replace")
+
+    def encode_iterable(self, f: Iterable[str]) -> Iterator[int]:
+        chunk_size = 2048
+        lingering_chunks = []
+        if not self.special_tokens:
+            yield from self.encode(f.read())
+            return
+        assert len(self.special_tokens) == 1
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            lingering_chunks.append(chunk)
+            lingering_text = "".join(lingering_chunks)
+            ret = lingering_text.rfind(self.special_tokens[0])
+
+            if ret != -1:
+                position = ret + len(self.special_tokens[0])
+                text_to_tokenize = lingering_text[:position]
+                lingering_chunks = [lingering_text[position:]]
+                # print(text_to_tokenize, end="\n"+"="*80+"\n")
+                yield from self.encode(text_to_tokenize)
+            else:
+                lingering_chunks.append(chunk)
+
+        if lingering_chunks:
+            yield from self.encode("".join(lingering_chunks))
+        return
 
     @classmethod
     def from_files(cls, vocab_path: str, merges_path: str, special_tokens: list[str] | None = None) -> "Tokenizer":
