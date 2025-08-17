@@ -59,7 +59,7 @@ def build_pretokens_chunked(input_path, special_tokens):
     fp.seek(0, os.SEEK_END)
     file_size = fp.tell()
     fp.seek(0)
-    num_processes = pool_size*64
+    num_processes = pool_size
     chunk_size = file_size // num_processes
     print(f"{chunk_size=}")
     num_chunks = file_size // chunk_size + 1
@@ -206,9 +206,16 @@ class Tokenizer:
         ans = [self.vocab[t] for t in tokens]
         return b"".join(ans).decode("utf-8", errors="replace")
 
-    def encode_iterable(self, f: Iterable[str]) -> Iterator[int]:
-        chunk_size = 2048
+    def encode_iterable(self, f: Iterable[str], chunk_size: int = 524288) -> Iterator[int]:
         lingering_chunks = []
+        # create a tqdm progress bar
+        # total file size
+        f.seek(0, os.SEEK_END)
+        file_size = f.tell()
+        f.seek(0)
+        pbar = tqdm(total=file_size, desc="Encoding")
+        pbar.update(0)
+        total_done = 0
         if not self.special_tokens:
             yield from self.encode(f.read())
             return
@@ -227,11 +234,17 @@ class Tokenizer:
                 lingering_chunks = [lingering_text[position:]]
                 # print(text_to_tokenize, end="\n"+"="*80+"\n")
                 yield from self.encode(text_to_tokenize)
+                total_done += len(text_to_tokenize)
+                pbar.update(len(text_to_tokenize))
             else:
                 lingering_chunks.append(chunk)
 
         if lingering_chunks:
-            yield from self.encode("".join(lingering_chunks))
+            text_to_tokenize = "".join(lingering_chunks)
+            yield from self.encode(text_to_tokenize)
+            total_done += len(text_to_tokenize)
+            pbar.update(len(text_to_tokenize))
+        pbar.close()
         return
 
     @classmethod
