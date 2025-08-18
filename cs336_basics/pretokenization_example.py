@@ -49,11 +49,13 @@ def find_chunk_boundaries(
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
 
+num_processes = 10
+fname = "data/TinyStoriesV2-GPT4-valid.txt"
 ## Usage
-with open(..., "rb") as f:
+with open(fname, "rb") as f:
     boundaries = find_chunk_boundaries(
         f, num_processes, "<|endoftext|>".encode("utf-8"))
-        
+    print(boundaries)
     # The following is a serial implementation, but you can parallelize this 
     # by sending each start/end pair to a set of processes.
     for start, end in zip(boundaries[:-1], boundaries[1:]):

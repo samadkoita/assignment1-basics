@@ -12,7 +12,7 @@ from torch import Tensor
 
 
 from cs336_basics.tokenization import train_bpe, Tokenizer
-
+from cs336_basics.model import Linear
 
 def run_linear(
     d_in: int,
@@ -32,8 +32,13 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    state_dict = {
+        "w": weights
+    }
+    model = Linear(in_features=d_in, out_features=d_out)
+    model.load_state_dict(state_dict)
+    result = model(in_features)
+    return result
 
 
 def run_embedding(
@@ -596,18 +601,20 @@ config = {
     "owt": {
         "input_path": "./data/owt_train.txt",
         "vocab_size": 32000,
-        "special_tokens": ["<|endoftext|>"]
+        "special_tokens": ["<|endoftext|>"],
+        "output_prefix": "owt"
     },
     "TinyStories": {
         "input_path": "./data/TinyStoriesV2-GPT4-train.txt",
         "vocab_size": 10000,
-        "special_tokens": ["<|endoftext|>"]
+        "special_tokens": ["<|endoftext|>"],
+        "output_prefix": "TinyStories"
     }
 }
 
 if __name__ == "__main__":
     st = time.time()
-    key = "owt"
+    key = "TinyStories"
     data_path, vocab_size = config[key]["input_path"], config[key]["vocab_size"]
     special_tokens = config[key]["special_tokens"]
     vocab, merges = run_train_bpe(
@@ -616,10 +623,10 @@ if __name__ == "__main__":
         vocab_size=vocab_size,
         special_tokens=["<|endoftext|>"]
     )
-    with open("./data/vocab_owt2t", "wb") as f:
+    with open(f"./data/vocab_{config[key]['output_prefix']}", "wb") as f:
         import pickle
         pickle.dump(vocab, f)
-    with open("./data/merges_owt2", "wb") as f: 
+    with open(f"./data/merges_{config[key]['output_prefix']}", "wb") as f: 
         pickle.dump(merges, f)
     end = time.time()
     print(end - st)
