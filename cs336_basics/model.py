@@ -3,6 +3,7 @@ import math
 import einops
 import torch
 from torch import nn
+from typing import Optional
 from jaxtyping import Float, Int
 import einops
 
@@ -31,6 +32,38 @@ class Embedding(nn.Module):
     def forward(self, x: Float[torch.Tensor, "... seqlen"]) -> Int[torch.Tensor, "... seqlen embedding_dim"]:
         return self.embeddings[x]
 
+def silu(x: Float[torch.Tensor, "... d_model"]) -> Float[torch.Tensor, "... d_model"]:
+    return x * torch.sigmoid(x)
+
+class SwiGLU(nn.Module):
+    def __init__(self, d_model: int, d_ff: int, device: torch.device | None = None, dtype: torch.dtype | None = None):
+        super().__init__()
+        self.w1 = Linear(d_model, d_ff, device, dtype)
+        self.w2 = Linear(d_ff, d_model, device, dtype)
+        self.w3 = Linear(d_model, d_ff, device, dtype)
+
+    def forward(self, x: Float[torch.Tensor, "... d_model"]) -> Float[torch.Tensor, "... d_model"]:
+        return self.w2(silu(self.w1(x)) * self.w3(x))
+
+
+class RMSNorm(nn.Module):
+    def __init__(self, d_model: int, eps: Float = 1e-5, device: torch.device | None = None, dtype: torch.dtype | None = None):
+        super().__init__()
+        self.d_model: int = d_model
+        self.eps = torch.tensor(eps, dtype=dtype)
+        self.gain = nn.Parameter(
+            data=torch.ones(size=(d_model,)), dtype=dtype, device=device
+        )
+
+    def forward(self, x: Float[torch.Tensor, "... d_model"]):
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+        rmse = torch.sqrt(torch.sum(x**2, dim=-1, keepdim=True) / self.d_model + self.eps)
+        x = x * self.gain / rmse
+        return x.to(in_dtype)
+
+
 if __name__ == "__main__":
     model = Embedding(3, 4)
+
 
