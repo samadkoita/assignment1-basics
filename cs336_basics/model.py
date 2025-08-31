@@ -14,7 +14,7 @@ class Linear(nn.Module):
         self.w: nn.Parameter = nn.Parameter(data=init_weights)
         std = math.sqrt(2/(in_features + out_features))
         torch.nn.init.trunc_normal_(self.w, mean=0, std=std, a=-3*std, b=3*std)
-    
+
     def forward(self, x: Float[torch.Tensor, "... d_in"]):
         return einops.einsum(
             x, self.w, "... d_in, d_out d_in -> ... d_out"
@@ -62,8 +62,37 @@ class RMSNorm(nn.Module):
         x = x * self.gain / rmse
         return x.to(in_dtype)
 
+class RotaryPositionalEmbedding(nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        self.device=device
+
+        positions = torch.arange(max_seq_len, device=device)
+        thetas = theta**(-2 * torch.arange(d_k//2, device=device) / d_k)
+        angles_seq_dk = einops.einsum(positions, thetas, "seqlen, d_k -> seqlen d_k")
+
+        cos_angles = torch.cos(angles_seq_dk)
+        sin_angles = torch.sin(angles_seq_dk)
+
+
+        self.register_buffer("sin_embedding", sin_angles, persistent=False)
+        self.register_buffer("cos_embedding", cos_angles, persistent=False)
+
+    def forward(self, x: Float[torch.Tensor, "... seqlen d_k"], token_positions: Int[torch.Tensor, "... seqlen"]) -> Float[torch.Tensor, "... seqlen d_k"]:
+        cos_vals_seq_dk = self.cos_embedding[token_positions]
+        sin_vals_seq_dk = self.sin_embedding[token_positions]
+        out = torch.empty(size=x.shape)
+        even_x = x[..., ::2]
+        odd_x = x[..., 1::2]
+        out[..., ::2] = cos_vals_seq_dk*even_x - sin_vals_seq_dk*odd_x
+        out[..., 1::2] = sin_vals_seq_dk*even_x + cos_vals_seq_dk*odd_x
+        return out
 
 if __name__ == "__main__":
-    model = Embedding(3, 4)
-
-
+    model = RotaryPositionalEmbedding(
+        theta=10, d_k=4, max_seq_len=10
+    )
+    model(torch.rand((5, 3, 4)), [0, 1, 2])
