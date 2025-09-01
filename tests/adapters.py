@@ -65,7 +65,7 @@ def run_embedding(
         embedding_dim=d_model,
     )
     state_dict = {
-        "embeddings": weights
+        "weight": weights
     }
     model.load_state_dict(state_dict)
     return model(token_ids)
@@ -212,14 +212,14 @@ def run_multihead_self_attention_with_rope(
     """
     head_dim = d_model // num_heads
     rope = RotaryPositionalEmbedding(theta=theta, d_k=head_dim, max_seq_len=max_seq_len)
-    mhsa = MultiHeadSelfAttention(d_model, num_heads, rope)
+    mhsa = MultiHeadSelfAttention(d_model, num_heads)
     mhsa.load_state_dict({
         "q_proj.weight": q_proj_weight,
         "k_proj.weight": k_proj_weight,
         "v_proj.weight": v_proj_weight,
         "output_proj.weight": o_proj_weight,
     })
-    return mhsa(in_features, token_positions)
+    return mhsa(in_features, rope, token_positions)
 
 
 def run_rope(
@@ -316,7 +316,14 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+    )
+    block.load_state_dict(weights)
+    rope = RotaryPositionalEmbedding(theta=theta, d_k=d_model//num_heads, max_seq_len=max_seq_len)
+    return block(in_features, rope, token_positions=torch.arange(in_features.shape[-2], device=in_features.device))
 
 
 def run_transformer_lm(
@@ -398,7 +405,17 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+    transformer.load_state_dict(weights)
+    return transformer(in_indices, token_positions=torch.arange(in_indices.shape[1], device=in_indices.device))
 
 
 def run_rmsnorm(

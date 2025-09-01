@@ -25,12 +25,12 @@ class Embedding(nn.Module):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        self.embeddings = nn.Parameter(data=torch.empty(size=(num_embeddings, embedding_dim)))
-        torch.nn.init.trunc_normal_(self.embeddings, mean=0, std=1, a=-3, b=3)
+        self.weight = nn.Parameter(data=torch.empty(size=(num_embeddings, embedding_dim)))
+        torch.nn.init.trunc_normal_(self.weight, mean=0, std=1, a=-3, b=3)
 
 
     def forward(self, x: Float[torch.Tensor, "... seqlen"]) -> Int[torch.Tensor, "... seqlen embedding_dim"]:
-        return self.embeddings[x]
+        return self.weight[x]
 
 def silu(x: Float[torch.Tensor, "... d_model"]) -> Float[torch.Tensor, "... d_model"]:
     return x * torch.sigmoid(x)
@@ -106,7 +106,7 @@ def scaled_dot_product_attention(q: Float[torch.Tensor, "... seq1 d_k"],
     return final
 
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, rope: Optional[RotaryPositionalEmbedding] = None):
+    def __init__(self, d_model: int, num_heads: int):
         super().__init__()
         self.q_proj = Linear(d_model, d_model)
         self.k_proj = Linear(d_model, d_model)
@@ -114,21 +114,60 @@ class MultiHeadSelfAttention(nn.Module):
         self.output_proj = Linear(d_model, d_model)
         self.num_heads = num_heads
         self.d_model = d_model
-        self.rope = rope
         assert d_model % num_heads == 0
     
-    def forward(self, x: Float[torch.Tensor, "... seq d_model"], token_positions: Optional[Int[torch.Tensor, "... seq"]] = None):
+    def forward(self, x: Float[torch.Tensor, "... seq d_model"], rope: Optional[RotaryPositionalEmbedding] = None, token_positions: Optional[Int[torch.Tensor, "... seq"]] = None):
         q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         to_mh = lambda t: einops.rearrange(t, "... seq (num_heads head_dim) -> ... num_heads seq head_dim", num_heads=self.num_heads)
         q, k, v = to_mh(q), to_mh(k), to_mh(v)
         seqlen = x.shape[-2]
-        if token_positions is not None and self.rope:
-            q = self.rope(q, token_positions)
-            k = self.rope(k, token_positions)
+        if rope:
+            if token_positions is None:
+                raise ValueError("token_positions is required when using RoPE")
+            q = rope(q, token_positions)
+            k = rope(k, token_positions)
         mask = torch.tril(torch.ones(size=(seqlen, seqlen)))
         res = scaled_dot_product_attention(q, k, v, mask)
         res = einops.rearrange(res, "... num_heads seq d_v -> ... seq (num_heads d_v)")
         return self.output_proj(res)
+
+class TransformerBlock(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int):
+        super().__init__()
+        head_dim = d_model // num_heads
+        self.ln1 = RMSNorm(d_model=d_model)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads)
+        self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff)
+        self.ln2 = RMSNorm(d_model=d_model)
+
+    def forward(self, x: Float[torch.Tensor, "... seq d_model"], rope: Optional[RotaryPositionalEmbedding] = None, token_positions: Optional[Int[torch.Tensor, "... seq"]] = None):
+        x += self.attn(self.ln1(x), rope, token_positions)
+        x += self.ffn(self.ln2(x))
+        return x
+
+class TransformerLM(nn.Module):
+    def __init__(self, vocab_size :int, context_length: int, d_model: int, num_layers: int, num_heads: int, d_ff: int, rope_theta: float):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.context_length = context_length
+        self.d_model = d_model
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.d_ff = d_ff
+        head_dim = d_model // num_heads
+        self.rope = RotaryPositionalEmbedding(theta=rope_theta, d_k=head_dim, max_seq_len=context_length)
+        self.token_embeddings = Embedding(vocab_size, d_model)
+        self.layers = nn.ModuleList([TransformerBlock(d_model=d_model, num_heads=num_heads, d_ff=d_ff) for _ in range(num_layers)])
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size)
+        pass
+
+    def forward(self, x: Int[torch.Tensor, "... seq"], token_positions: Int[torch.Tensor, "... seq"]):
+        x = self.token_embeddings(x)
+        for block in self.layers:
+            x = block(x, self.rope, token_positions)
+        x = self.lm_head(self.ln_final(x))
+        return x
 
 if __name__ == "__main__":
     model = RotaryPositionalEmbedding(
