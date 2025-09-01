@@ -93,6 +93,19 @@ def softmax(in_features: Float[torch.Tensor, " ..."], dim: int) -> Float[torch.T
     in_features /= torch.sum(in_features, dim=dim, keepdim=True)
     return in_features 
 
+def scaled_dot_product_attention(q: Float[torch.Tensor, "... seq1 d_k"],
+                                 k: Float[torch.Tensor, "... seq2 d_k"],
+                                 v: Float[torch.Tensor, "... seq2 d_v"],
+                                 mask: Optional[Float[torch.Tensor, "... seq1 seq2"]] = None):
+    d_k = torch.tensor(q.shape[-1], device=q.device)
+    qk = einops.einsum(q, k, "... seq1 d_k, ... seq2 d_k -> ... seq1 seq2") / torch.sqrt(d_k)
+    if mask is not None:
+        qk.masked_fill_(mask == 0, -torch.inf)
+    qk = softmax(qk, dim=-1)
+    final = einops.einsum(qk, v, "... seq1 seq2, ... seq2 d_v -> ... seq1 d_v")
+    return final
+
+
 if __name__ == "__main__":
     model = RotaryPositionalEmbedding(
         theta=10, d_k=4, max_seq_len=10
