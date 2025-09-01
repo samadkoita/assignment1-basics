@@ -253,6 +253,7 @@ class Tokenizer:
         merges = pickle.load(open(merges_path, "rb"))
         return cls(vocab, merges, special_tokens)
 
+
 if __name__ == "__main__":
     vocab_path = "data/vocab_TinyStories_final"
     merges_path = "data/merges_TinyStories_final"
