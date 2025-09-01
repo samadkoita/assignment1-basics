@@ -134,7 +134,6 @@ class MultiHeadSelfAttention(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int):
         super().__init__()
-        head_dim = d_model // num_heads
         self.ln1 = RMSNorm(d_model=d_model)
         self.attn = MultiHeadSelfAttention(d_model, num_heads)
         self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff)
