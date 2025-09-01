@@ -11,13 +11,13 @@ class Linear(nn.Module):
     def __init__(self, in_features: int, out_features:int, device: torch.device | None =None, dtype: torch.dtype | None =None):
         super().__init__()
         init_weights = torch.empty(out_features, in_features, dtype=dtype, device=device)
-        self.w: nn.Parameter = nn.Parameter(data=init_weights)
+        self.weight: nn.Parameter = nn.Parameter(data=init_weights)
         std = math.sqrt(2/(in_features + out_features))
-        torch.nn.init.trunc_normal_(self.w, mean=0, std=std, a=-3*std, b=3*std)
+        torch.nn.init.trunc_normal_(self.weight, mean=0, std=std, a=-3*std, b=3*std)
 
     def forward(self, x: Float[torch.Tensor, "... d_in"]):
         return einops.einsum(
-            x, self.w, "... d_in, d_out d_in -> ... d_out"
+            x, self.weight, "... d_in, d_out d_in -> ... d_out"
         )
 
 class Embedding(nn.Module):
@@ -51,15 +51,15 @@ class RMSNorm(nn.Module):
         super().__init__()
         self.d_model: int = d_model
         self.eps = torch.tensor(eps, dtype=dtype)
-        self.gain = nn.Parameter(
-            data=torch.ones(size=(d_model,)), dtype=dtype, device=device
+        self.weight = nn.Parameter(
+            data=torch.ones(size=(d_model,), dtype=dtype, device=device)
         )
 
     def forward(self, x: Float[torch.Tensor, "... d_model"]):
         in_dtype = x.dtype
         x = x.to(torch.float32)
         rmse = torch.sqrt(torch.sum(x**2, dim=-1, keepdim=True) / self.d_model + self.eps)
-        x = x * self.gain / rmse
+        x = x * self.weight / rmse
         return x.to(in_dtype)
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -97,14 +97,38 @@ def scaled_dot_product_attention(q: Float[torch.Tensor, "... seq1 d_k"],
                                  k: Float[torch.Tensor, "... seq2 d_k"],
                                  v: Float[torch.Tensor, "... seq2 d_v"],
                                  mask: Optional[Float[torch.Tensor, "... seq1 seq2"]] = None):
-    d_k = torch.tensor(q.shape[-1], device=q.device)
-    qk = einops.einsum(q, k, "... seq1 d_k, ... seq2 d_k -> ... seq1 seq2") / torch.sqrt(d_k)
+    d_k = q.shape[-1]
+    qk = einops.einsum(q, k, "... seq1 d_k, ... seq2 d_k -> ... seq1 seq2") * (d_k**(-0.5))
     if mask is not None:
         qk.masked_fill_(mask == 0, -torch.inf)
     qk = softmax(qk, dim=-1)
     final = einops.einsum(qk, v, "... seq1 seq2, ... seq2 d_v -> ... seq1 d_v")
     return final
 
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, rope: Optional[RotaryPositionalEmbedding] = None):
+        super().__init__()
+        self.q_proj = Linear(d_model, d_model)
+        self.k_proj = Linear(d_model, d_model)
+        self.v_proj = Linear(d_model, d_model)
+        self.output_proj = Linear(d_model, d_model)
+        self.num_heads = num_heads
+        self.d_model = d_model
+        self.rope = rope
+        assert d_model % num_heads == 0
+    
+    def forward(self, x: Float[torch.Tensor, "... seq d_model"], token_positions: Optional[Int[torch.Tensor, "... seq"]] = None):
+        q, k, v = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+        to_mh = lambda t: einops.rearrange(t, "... seq (num_heads head_dim) -> ... num_heads seq head_dim", num_heads=self.num_heads)
+        q, k, v = to_mh(q), to_mh(k), to_mh(v)
+        seqlen = x.shape[-2]
+        if token_positions is not None and self.rope:
+            q = self.rope(q, token_positions)
+            k = self.rope(k, token_positions)
+        mask = torch.tril(torch.ones(size=(seqlen, seqlen)))
+        res = scaled_dot_product_attention(q, k, v, mask)
+        res = einops.rearrange(res, "... num_heads seq d_v -> ... seq (num_heads d_v)")
+        return self.output_proj(res)
 
 if __name__ == "__main__":
     model = RotaryPositionalEmbedding(

@@ -12,7 +12,7 @@ from torch import Tensor
 
 
 from cs336_basics.tokenization import train_bpe, Tokenizer
-from cs336_basics.model import Linear, Embedding, SwiGLU, RMSNorm, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention
+from cs336_basics.model import *
 
 
 def run_linear(
@@ -34,7 +34,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
     state_dict = {
-        "w": weights
+        "weight": weights
     }
     model = Linear(in_features=d_in, out_features=d_out)
     model.load_state_dict(state_dict)
@@ -102,9 +102,9 @@ def run_swiglu(
     # swiglu.w3.weight.data = w3_weight
     model = SwiGLU(d_model, d_ff)
     state_dict = {
-        "w1.w": w1_weight,
-        "w2.w": w2_weight,
-        "w3.w": w3_weight,
+        "w1.weight": w1_weight,
+        "w2.weight": w2_weight,
+        "w3.weight": w3_weight,
     }
     model.load_state_dict(state_dict)
     return model(in_features)
@@ -162,7 +162,15 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mhsa = MultiHeadSelfAttention(d_model, num_heads)
+    mhsa.load_state_dict({
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "output_proj.weight": o_proj_weight,
+
+    })
+    return mhsa(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -202,7 +210,16 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    head_dim = d_model // num_heads
+    rope = RotaryPositionalEmbedding(theta=theta, d_k=head_dim, max_seq_len=max_seq_len)
+    mhsa = MultiHeadSelfAttention(d_model, num_heads, rope)
+    mhsa.load_state_dict({
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "output_proj.weight": o_proj_weight,
+    })
+    return mhsa(in_features, token_positions)
 
 
 def run_rope(
@@ -405,7 +422,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     rms = RMSNorm(d_model, eps=eps)
-    rms.load_state_dict({"gain": weights})
+    rms.load_state_dict({"weight": weights})
     return rms(in_features)
 
 
@@ -420,7 +437,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return silu(in_features)
 
 
 def run_get_batch(
