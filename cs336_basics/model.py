@@ -126,7 +126,7 @@ class MultiHeadSelfAttention(nn.Module):
                 raise ValueError("token_positions is required when using RoPE")
             q = rope(q, token_positions)
             k = rope(k, token_positions)
-        mask = torch.tril(torch.ones(size=(seqlen, seqlen)))
+        mask = torch.tril(torch.ones(size=(seqlen, seqlen), dtype=torch.bool))
         res = scaled_dot_product_attention(q, k, v, mask)
         res = einops.rearrange(res, "... num_heads seq d_v -> ... seq (num_heads d_v)")
         return self.output_proj(res)
