@@ -1,3 +1,4 @@
+import math
 import torch
 from typing import Optional, Callable
 from termcolor import colored
@@ -57,14 +58,13 @@ class AdamW(torch.optim.Optimizer):
                 state['t'] = t + 1
         return loss
 
+def lr_cosine_schedule(t: int, alpha_max: float, alpha_min: float, t_w: int, t_c: int):
+    if t < t_w:
+        return alpha_max*t/t_w
+    if t > t_c:
+        return alpha_min
+    return alpha_min + (alpha_max - alpha_min)*(1 + math.cos(math.pi*(t - t_w)/(t_c - t_w)))/2
                 
-
-                
-
-                
-            
-
-
 
 if __name__ == "__main__":
     torch.optim.AdamW

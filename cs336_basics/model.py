@@ -168,6 +168,22 @@ class TransformerLM(nn.Module):
         x = self.lm_head(self.ln_final(x))
         return x
 
+def cross_entropy(inputs: Float[torch.Tensor, "batch vocab"], targets: Int[torch.Tensor, "batch_size"]):
+    inputs = inputs - torch.max(inputs, dim=-1, keepdim=True)[0]
+    log_sum = torch.log(torch.sum(torch.exp(inputs), dim=-1))
+    loss_values = inputs[torch.arange(len(targets)), targets]
+    return (-loss_values + log_sum).mean()
+
+def clip_gradients(paramters: list[torch.nn.Parameter], max_l2_norm: float, eps=1e-6):
+    l2_norm = sum((p.grad.data**2).sum().item() for p in paramters if p.grad is not None)
+    l2_norm = l2_norm**0.5
+    if l2_norm < max_l2_norm:
+        return paramters
+    for p in paramters:
+        if p.grad is None:
+            continue
+        p.grad.data.mul_(max_l2_norm/(l2_norm + eps))
+
 if __name__ == "__main__":
     model = RotaryPositionalEmbedding(
         theta=10, d_k=4, max_seq_len=10
