@@ -52,7 +52,7 @@ class AdamW(torch.optim.Optimizer):
                 
                 lr_eff = lr * ((1 - beta2**t)**0.5) / (1 - beta1**t)
                 p.data = p.data.mul_(1 - lr*weight_decay)
-                p.data = p.data - (lr_eff*m/ (v**0.5 + eps))
+                p.data = p.data.sub_((lr_eff*m/ (v**0.5 + eps)))
                 state['m'] = m
                 state['v'] = v
                 state['t'] = t + 1
